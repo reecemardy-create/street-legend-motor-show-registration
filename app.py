@@ -1,86 +1,86 @@
+import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, flash
-from db_config import get_db_connection
 
 app = Flask(__name__)
-app.secret_key = "secret123"
+app.secret_key = "street_legends_secret"
+
+
+def get_db_connection():
+    conn = sqlite3.connect('motorshow.db')
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db():
-    """Create table if it does not exist"""
     conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS motorshow(
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            first_name VARCHAR(100),
-            last_name VARCHAR(100),
-            email VARCHAR(150),
-            vehicle_brand VARCHAR(100),
-            vehicle_model VARCHAR(100),
-            plate_number VARCHAR(50),
-            registration_date DATE
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT, last_name TEXT, email TEXT,
+            vehicle_brand TEXT, vehicle_model TEXT,
+            plate_number TEXT, registration_date TEXT
         )
     """)
-
     conn.commit()
-    cursor.close()
     conn.close()
 
 
+# ROUTE 1: THE REGISTRATION FORM
 @app.route("/", methods=["GET", "POST"])
 def index():
-    init_db()  # ensure table exists
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
     if request.method == "POST":
         data = (
-            request.form["first_name"].strip(),
-            request.form["last_name"].strip(),
-            request.form["email"].strip(),
-            request.form["vehicle_brand"].strip(),
-            request.form["vehicle_model"].strip(),
-            request.form["plate_number"].strip(),
-            request.form["registration_date"]
+            request.form.get("first_name").strip(),
+            request.form.get("last_name").strip(),
+            request.form.get("email").strip(),
+            request.form.get("vehicle_brand").strip(),
+            request.form.get("vehicle_model").strip(),
+            request.form.get("plate_number").strip().upper(),
+            request.form.get("registration_date")
         )
 
-        # validation
-        if any(x == "" for x in data):
-            flash("All fields are required.", "danger")
-        else:
-            cursor.execute("""
-                INSERT INTO motorshow
-                (first_name, last_name, email, vehicle_brand, vehicle_model, plate_number, registration_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, data)
+        if all(data):
+            conn = get_db_connection()
+            conn.execute(
+                "INSERT INTO motorshow (first_name, last_name, email, vehicle_brand, vehicle_model, plate_number, registration_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                data)
             conn.commit()
-            flash("Vehicle registered successfully!", "success")
+            conn.close()
+            flash("Success! You are registered.", "success")
+            return redirect(url_for("entry_list"))  # Redirect to the list after clicking button
+        else:
+            flash("All fields are required.", "danger")
 
-    cursor.execute("SELECT * FROM motorshow ORDER BY id DESC")
-    records = cursor.fetchall()
+    return render_template("index.html")
 
-    cursor.close()
+
+# ROUTE 2: THE ENTRY LIST
+@app.route("/entries")
+def entry_list():
+    conn = get_db_connection()
+    search_query = request.args.get('search', '').strip()
+
+    if search_query:
+        query = "SELECT * FROM motorshow WHERE first_name LIKE ? OR vehicle_brand LIKE ? OR plate_number LIKE ? ORDER BY id DESC"
+        val = f"%{search_query}%"
+        records = conn.execute(query, (val, val, val)).fetchall()
+    else:
+        records = conn.execute("SELECT * FROM motorshow ORDER BY id DESC").fetchall()
+
     conn.close()
-
-    return render_template("index.html", records=records)
+    return render_template("entry.html", records=records, search_query=search_query)
 
 
 @app.route("/delete/<int:id>")
 def delete(id):
     conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("DELETE FROM motorshow WHERE id = %s", (id,))
+    conn.execute("DELETE FROM motorshow WHERE id = ?", (id,))
     conn.commit()
-
-    cursor.close()
     conn.close()
-
-    flash("Entry deleted successfully.", "warning")
-    return redirect(url_for("index"))
+    flash("Entry removed.", "warning")
+    return redirect(url_for("entry_list"))
 
 
 if __name__ == "__main__":
+    init_db()
     app.run(debug=True)
